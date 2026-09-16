@@ -1,0 +1,285 @@
+# Counselstone — Build Brief
+
+## Stack
+- Laravel 13
+- Filament v5 (beta)
+- MySQL
+- No FilamentShield — role gating via canAccess()/canView() with hasAnyRole()
+- $isDiscovered = false on all widgets
+- Inline CSS in blade tables (not Tailwind — gets purged by JIT)
+- Single tenant for now (Alex's firm only) but scaffold for multi-tenancy later
+
+## Environment Safety
+- APP_DEBUG must only be true when APP_URL is a genuine local dev address
+  (http://localhost, http://127.0.0.1, or a *.test/*.localhost domain such as
+  Laragon's auto-generated http://counselstone.test). Never pair APP_DEBUG=true
+  with a real/deployed APP_URL — visitors would see full stack traces on error.
+- AppServiceProvider::preventDebugModeOnNonLocalUrl() forces debug off as a
+  safety net if this is ever misconfigured, but .env should be set correctly
+  regardless — don't rely on the safety net.
+- APP_ENV should be "local" for dev, "production" for a real deploy. LOG_LEVEL
+  should drop from "debug" to something quieter (e.g. "error") in production.
+- The seeded director account (database/seeders/DatabaseSeeder.php) generates
+  a random password printed once to the console on `db:seed` — it is not
+  stored anywhere, so copy it immediately and change it after first login.
+
+## Brand
+- Primary: #0F5C4D
+- Mid teal: #1A7A65
+- Gold: #C9A84C
+- Stone: #F7F4EE
+- Dark teal: #0A3D33
+- Text: #2C2C2C
+
+## Roles
+Four roles in ascending permission order:
+
+- **solicitor** — sees all matters by default, but a `SCOPE_SOLICITORS` config flag
+  exists (default false) to restrict to assigned matters only — switch on without
+  a rebuild when needed. No financials, no locked/director_only content.
+- **accounts** — payment plans, instalments, chase logs, Xero integration only.
+  No case notes, no director_only content.
+- **admin** — day to day management: clients, leads, documents, matters.
+  Cannot delete or edit locked records. Cannot see director_only content.
+- **director** — full access to everything. Only role that can lock records,
+  unlock records, and see director_only flagged content. Cannot be restricted.
+
+## Locking & Director-Only Fields
+Add to any table that needs protection:
+- `locked` (bool, default false) — when true, only director can edit or delete
+- `director_only` (bool, default false) — when true, only director can see
+
+Apply this pattern to canEdit() / canDelete() on every Filament resource:
+
+```php
+public static function canEdit(Model $record): bool
+{
+    if ($record->locked) {
+        return auth()->user()->hasRole('director');
+    }
+    return auth()->user()->hasAnyRole(['director', 'admin']);
+}
+
+public static function canDelete(Model $record): bool
+{
+    if ($record->locked) {
+        return auth()->user()->hasRole('director');
+    }
+    return auth()->user()->hasAnyRole(['director', 'admin']);
+}
+```
+
+## Domain Model
+
+### users
+- id
+- name
+- email
+- password
+- role (enum: director, admin, solicitor, accounts)
+- timestamps
+
+### clients
+- id
+- first_name
+- last_name
+- email
+- phone
+- address
+- source (enum: phone, web, referral)
+- notes (internal)
+- portal_token (nullable string)
+- portal_enabled (bool, default false)
+- portal_last_login (nullable timestamp)
+- locked (bool, default false)
+- director_only (bool, default false)
+- timestamps
+
+### matters
+- id
+- client_id (FK → clients)
+- reference (auto-generated: CS-{YEAR}-{padded sequential e.g. CS-2026-001})
+- practice_area (string — not enum, extensible)
+- court_date (nullable date)
+- status (enum: active, suspended, closed, won, lost)
+- assigned_user_id (FK → users, nullable)
+- notes (text, internal — not visible to client)
+- locked (bool, default false)
+- director_only (bool, default false)
+- timestamps
+
+### payment_plans
+- id
+- matter_id (FK → matters)
+- total_amount (decimal 10,2)
+- deposit_amount (decimal 10,2)
+- deposit_paid_at (nullable timestamp)
+- notes
+- locked (bool, default false)
+- timestamps
+
+### instalments
+- id
+- payment_plan_id (FK → payment_plans)
+- amount (decimal 10,2)
+- due_date (date)
+- paid_at (nullable timestamp)
+- status (enum: pending, overdue, paid, waived)
+- xero_invoice_id (nullable string)
+- timestamps
+
+### chase_logs
+- id
+- instalment_id (FK → instalments)
+- channel (enum: email, sms)
+- template (string)
+- sent_at (timestamp)
+- status (enum: sent, failed)
+- timestamps
+
+### leads
+- id
+- first_name
+- last_name
+- email
+- phone
+- source (enum: phone, web, referral)
+- practice_area (string)
+- message (text)
+- status (enum: new, contacted, converted, lost)
+- assigned_user_id (FK → users, nullable)
+- nurture_stage (int, default 0)
+- last_contacted_at (nullable timestamp)
+- converted_at (nullable timestamp)
+- locked (bool, default false)
+- director_only (bool, default false)
+- timestamps
+
+### nurture_sequences
+- id
+- lead_id (FK → leads)
+- step (int)
+- channel (enum: email, sms)
+- scheduled_at (timestamp)
+- sent_at (nullable timestamp)
+- status (enum: pending, sent, cancelled, failed)
+- timestamps
+
+### matter_documents
+- id
+- matter_id (FK → matters)
+- uploaded_by_type (string: user/client)
+- uploaded_by_id (int)
+- filename (string)
+- path (string)
+- visible_to_client (bool, default false)
+- locked (bool, default false)
+- timestamps
+
+### matter_messages
+- id
+- matter_id (FK → matters)
+- from_type (string: user/client)
+- from_id (int)
+- body (text)
+- read_at (nullable timestamp)
+- timestamps
+
+### client_requests
+- id
+- matter_id (FK → matters)
+- requested_by_user_id (FK → users)
+- description (text)
+- status (enum: pending, completed)
+- completed_at (nullable timestamp)
+- timestamps
+
+## Payment Chase Logic
+Daily scheduled job checks all instalments where due_date has passed and paid_at is null:
+- 3 days overdue → chase email step 1 (friendly reminder)
+- 7 days overdue → chase email step 2 (firmer tone)
+- 14 days overdue → SMS step 1
+- 21 days overdue → SMS step 2 + set matter status to suspended + notify director
+- Xero webhook confirms payment → set paid_at, set status to paid, cancel pending chase steps
+- Log every chase action in chase_logs
+- Never send a chase step that has already been logged for that instalment
+
+## Lead Nurture Logic
+- Lead created → send acknowledgement email immediately (step 0)
+- 48hrs no response → follow up email (step 1)
+- 5 days no response → SMS nudge (step 2)
+- 10 days no response → final email, mark status as lost (step 3)
+- Lead responds at any point → pause sequence, flag for manual follow up
+- Converted leads → cancel all pending nurture sequences
+
+## Client Portal (Phase 2 — schema built, UI deferred)
+- Separate auth guard at /portal
+- Clients see: matter status, court date, payment plan, instalments, documents where visible_to_client=true, messages
+- Clients can: upload documents, reply to messages, complete their own profile, write client statement
+- Clients cannot see: internal notes, director_only content, suspended status reason, other clients
+
+## MVP Priority Order (Session Plan for Claude Code)
+
+### Session 1 — Foundation
+- All migrations in FK-safe order
+- User model with role enum
+- Seed: one director user (Alex)
+
+### Session 2 — Client & Matter resources
+- Client Filament resource (index, create, edit, view)
+- Matter resource with auto-reference generation (CS-{YEAR}-{sequential})
+- Matters relation manager on Client
+- locked/director_only gating on both
+- Solicitor scoping scaffold (config flag SCOPE_SOLICITORS, default false)
+
+### Session 3 — Payment resources
+- PaymentPlan resource
+- Instalment relation manager on PaymentPlan
+- ChaseLog relation manager (read only)
+- Overdue status auto-detection (status → overdue when due_date passed and paid_at null)
+
+### Session 4 — Leads
+- Lead resource with pipeline/kanban view
+- NurtureSequence relation manager
+- Status pipeline logic
+
+### Session 5 — Automation
+- Payment chase scheduled job + email templates (tiered as above)
+- Lead nurture scheduled job + email templates
+- Xero webhook receiver endpoint
+
+### Session 6 — Polish
+- Dashboard widgets: overdue instalments count, new leads count, matters by status
+- Navigation grouping and icons
+- Brand colours applied to AdminPanelProvider
+
+## Audit Logging
+- Uses spatie/laravel-activitylog (polymorphic activity_log table), not a
+  bespoke per-model audit table — the earlier TimeEntry-only
+  time_entry_audits/TimeEntryAudit mechanism was removed in favour of this.
+- Model side: add `LogsActivity` + `App\Concerns\HasReasonedActivityLog`
+  traits, then define `getActivitylogOptions()` (see TimeEntry/
+  PrecedentTemplate for the pattern: useLogName(), logFillable(),
+  logOnlyDirty(), dontSubmitEmptyLogs()). useLogName() must match the tab key
+  used in ListAuditLog::getTabs().
+- Filament side, for a full Resource Edit page: add
+  App\Filament\Concerns\RequiresChangeReasonOnEdit to the Edit page class,
+  and add ::changeReasonField() to the resource's form schema. For a
+  relation-manager modal EditAction instead, add
+  App\Filament\Support\ChangeReasonField::make() to its form and override
+  EditAction::using() to call $record->updateWithReason($data, $reason)
+  (see TimeEntryRelationManager). The reason field only appears/requires on
+  the edit operation, never create.
+- Creation and deletion are logged automatically with no reason required —
+  only edits require one.
+- Browsing the log: app/Filament/Admin/Resources/AuditLog (nav group
+  "Audit Log", director-only via canAccess()). Add a new tab in
+  ListAuditLog::getTabs() per newly-audited resource.
+
+## Filament Patterns (enforce in every session)
+- canAccess() and canView() for role gating — never FilamentShield
+- $isDiscovered = false on all widgets
+- Inline CSS in blade, not Tailwind classes
+- All resources under app/Filament/Admin/Resources
+- All pages under app/Filament/Admin/Pages
+- All widgets under app/Filament/Admin/Widgets
