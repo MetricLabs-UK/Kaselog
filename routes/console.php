@@ -48,7 +48,7 @@ Schedule::command('app:expire-stale-impersonation-sessions')
 // 'documents' disk at the same time.
 Schedule::command('backup:sync-documents')
     ->dailyAt('01:00')
-    ->name('sync-documents-to-sharepoint')
+    ->name('sync-documents-to-backup-disk')
     ->onFailure(function (): void {
         // Belt-and-braces for a hard crash (uncaught exception) that never
         // reached the command's own per-run failure notification — that one
@@ -61,7 +61,7 @@ Schedule::command('backup:sync-documents')
     });
 
 // DB (counselstone + the audit connection) + files, zipped together, to
-// both the local disk and SharePoint (config/backup.php).
+// both the local disk and B2 (config/backup.php).
 Schedule::command('backup:run')
     ->weeklyOn(0, '02:00')
     ->name('weekly-backup')

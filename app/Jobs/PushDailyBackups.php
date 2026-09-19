@@ -26,7 +26,7 @@ use Throwable;
  *
  * Deliberately a full whole-firm bundle every night, not an incremental
  * sync — this feature has no per-file change-tracking anywhere (unlike
- * Section 12's SyncDocumentsToSharePoint, which uses backed_up_at). If
+ * Section 12's SyncDocumentsToBackupDisk, which uses backed_up_at). If
  * nightly full re-uploads become a real size/time concern for a large
  * firm, that's the pattern to borrow; not built now since nothing asked
  * for it yet.

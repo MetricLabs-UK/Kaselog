@@ -177,15 +177,15 @@ return [
             'filename_prefix' => '',
 
             /*
-             * local is kept alongside sharepoint deliberately — a restore
-             * shouldn't depend solely on Graph API/network availability,
-             * and it's what the documented restore procedure (docs/
-             * backup-and-restore.md) exercises first.
+             * local is kept alongside s3 (Backblaze B2) deliberately — a
+             * restore shouldn't depend solely on B2 API/network
+             * availability, and it's what the documented restore procedure
+             * (docs/backup-and-restore.md) exercises first. BACKUP_DISKS
+             * defaults to 'local' alone (see .env.example) so a machine
+             * with no B2 credentials configured still runs; production
+             * sets BACKUP_DISKS=local,s3.
              */
-            'disks' => [
-                'local',
-                'sharepoint',
-            ],
+            'disks' => array_map('trim', explode(',', env('BACKUP_DISKS', 'local'))),
 
             /*
              * Determines whether to allow backups to continue when some targets fail instead of failing completely.
@@ -322,7 +322,7 @@ return [
     'monitor_backups' => [
         [
             'name' => env('APP_NAME', 'laravel-backup'),
-            'disks' => ['local', 'sharepoint'],
+            'disks' => array_map('trim', explode(',', env('BACKUP_DISKS', 'local'))),
             'health_checks' => [
                 // 8, not the package default of 1 — backups run weekly here
                 // (routes/console.php), so a 1-day health check would flag

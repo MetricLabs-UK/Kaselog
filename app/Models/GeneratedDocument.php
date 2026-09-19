@@ -13,7 +13,7 @@ use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
 // backed_up_at (Section 12) is deliberately not listed — only
-// App\Console\Commands\SyncDocumentsToSharePoint sets it, via forceFill().
+// App\Console\Commands\SyncDocumentsToBackupDisk sets it, via forceFill().
 #[Fillable([
     'matter_id',
     'precedent_template_id',

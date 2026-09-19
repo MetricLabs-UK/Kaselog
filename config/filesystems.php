@@ -86,6 +86,14 @@ return [
             'prefix' => env('SHAREPOINT_PREFIX', 'backups'),
         ],
 
+        /*
+         * Section 12's Backblaze B2 destination (S3-compatible) for
+         * spatie/laravel-backup — see config/backup.php's 'disks' and
+         * .env.example for the BACKUP_DISKS/AWS_* setup. 'throw' is
+         * deliberately true here (unlike the other disks above): without
+         * it Flysystem swallows write failures silently, which on a backup
+         * disk means believing backups exist when they don't.
+         */
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
@@ -95,8 +103,7 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
-            'throw' => false,
-            'report' => false,
+            'throw' => true,
         ],
 
     ],

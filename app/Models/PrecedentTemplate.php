@@ -16,7 +16,7 @@ use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
 // backed_up_at (Section 12) is deliberately not listed — only
-// App\Console\Commands\SyncDocumentsToSharePoint sets it, via forceFill().
+// App\Console\Commands\SyncDocumentsToBackupDisk sets it, via forceFill().
 // is_master/adopted_from_id are fillable so the Hub library form and
 // PrecedentTemplateAdoptionService can set them directly — no tenant-side
 // form field ever exposes either, so mass assignment from ordinary Filament
